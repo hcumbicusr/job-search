@@ -9,6 +9,7 @@ export class JobMapper {
         entidad: job.entidad,
         ubicacion: job.ubicacion,
         convocatoria: job.convocatoria,
+        vacantes: job.vacantes,
         remuneracion: job.remuneracion,
         fechaInicio: job.fechaInicio.toISOString().split('T')[0],
         fechaFin: job.fechaFin.toISOString().split('T')[0],

@@ -168,6 +168,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
             entidad: entity,
             ubicacion: getValueByLabel("Ubicación:"),
             convocatoria: getValueByLabel("Número de Convocatoria:"),
+            vacantes: getValueByLabel("Cantidad de Vacantes:"),
             remuneracion: getValueByLabel("Remuneración:"),
             fechaInicioStr: dateToIsoString(getValueByLabel("Fecha Inicio")),
             fechaFinStr: dateToIsoString(getValueByLabel("Fecha Fin")),

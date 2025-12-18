@@ -4,6 +4,7 @@ export interface FindJobResponse {
     entidad: string,
     ubicacion: string,
     convocatoria: string,
+    vacantes: number,
     remuneracion: string,
     fechaInicio: string,
     fechaFin: string,

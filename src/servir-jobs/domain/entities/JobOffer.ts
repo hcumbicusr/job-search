@@ -8,6 +8,7 @@ export class JobOffer {
     public readonly entidad: string,
     public readonly ubicacion: string,
     public readonly convocatoria: string,
+    public readonly vacantes: number,
     public readonly remuneracion: string,
     public readonly fechaInicio: Date,
     public readonly fechaFin: Date,
