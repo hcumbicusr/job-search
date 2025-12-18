@@ -12,7 +12,8 @@ export class JobOffer {
     public readonly fechaInicio: Date,
     public readonly fechaFin: Date,
     public readonly link: string,
-    public status: JobStatus = 'ACTIVO'
+    public status: JobStatus = 'ACTIVO',
+    public readonly createdAt: Date
   ) {}
 
   public isExpired(): boolean {
