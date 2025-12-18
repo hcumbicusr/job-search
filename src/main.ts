@@ -47,7 +47,7 @@ else {
       const { locations, profile } = req.body;
       // Usamos valores por defecto si no vienen en el body
       await scrapeUseCase.execute(
-        locations || ['LIMA', 'PIURA', 'TUMBES'], 
+        locations || ['LIMA'], 
         profile || 'INGENIERIA DE SISTEMAS'
       );
       await expireUseCase.execute();
