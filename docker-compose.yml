@@ -28,5 +28,5 @@ services:
       - /etc/localtime:/etc/localtime:ro
 
   
-volumes:
-  pgdata:
+# volumes:
+#   pgdata:
