@@ -1,4 +1,5 @@
-import puppeteer, { Page } from "puppeteer";
+import chromium from 'chrome-aws-lambda';
+import { Page } from 'puppeteer-core';
 import { IScraperService } from "../../application/services/IScraperService";
 import { JobOffer } from "../../domain/entities/JobOffer";
 
@@ -8,10 +9,11 @@ export class PuppeteerScraperAdapter implements IScraperService {
   async scrapeJobs(locations: string[], searchProfile: string): Promise<Partial<JobOffer>[]> {
     console.log(">> [Scraper] Starting extraction process...");
     
-    const browser = await puppeteer.launch({
-      headless: true, // false: abre el navegador
-      defaultViewport: null,
-      args: ["--start-maximized"],
+    const browser = await chromium.puppeteer.launch({
+      executablePath: await chromium.executablePath,
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      headless: true, //chromium.headless,
     });
 
     const page = await browser.newPage();
@@ -112,7 +114,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
    private async waitForTableToUpdate(page: Page, oldTitle: string): Promise<boolean> {
      try {
        await page.waitForFunction(
-         (selector, previousTitle) => {
+         (selector: any, previousTitle: any) => {
            const newTitleEl = document.querySelector(`${selector} .titulo-vacante label`);
            const currentTitle = newTitleEl ? newTitleEl.textContent?.trim() : "";
            const noRecords = document.body.innerText.includes("No se encontraron registros");
