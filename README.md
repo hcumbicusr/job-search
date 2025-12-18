@@ -22,6 +22,7 @@ El proyecto sigue una arquitectura hexagonal (aunque no se indica explícitament
 - [Node.js](https://nodejs.org/) (v18 o superior)
 - [npm](https://www.npmjs.com/)
 - [PostgreSQL](https://www.postgresql.org/)
+- [Docker](https://www.docker.com/)
 
 ## Instalación
 
@@ -43,6 +44,8 @@ El proyecto sigue una arquitectura hexagonal (aunque no se indica explícitament
     Crea un archivo `.env` en la raíz del proyecto y añade las siguientes variables:
 
     ```env
+    # NODE_ENV=production|staging|development
+    NODE_ENV=development
     PORT=5000
     DATABASE_URL=postgresql://username:password@localhost:5432/jobdb
     ```
@@ -58,6 +61,24 @@ npm run dev
 ```
 
 El servidor se iniciará en el puerto especificado en el archivo `.env` (por defecto 3000).
+
+### Uso con Docker
+
+1.  **Configurar variables de entorno para Docker:**
+
+    Crea un archivo `.env-docker` en la raíz del proyecto y añade las siguientes variables:
+
+    ```env
+    POSTGRES_USER=username
+    POSTGRES_PASSWORD=password
+    POSTGRES_DB=jobdb
+    ```
+
+2.  **Levantar los servicios:**
+
+    ```bash
+    docker-compose up --build -d
+    ```
 
 ### Modo CLI
 
