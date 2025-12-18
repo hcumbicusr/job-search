@@ -27,10 +27,26 @@ export class PostgresJobRepository implements IJobRepository {
   }
 
   async findActive(): Promise<JobOffer[]> {
-    const res = await this.pool.query("SELECT * FROM jobs WHERE status = 'ACTIVO'");
-    return res.rows.map((row: any) => new JobOffer(
-        row.id, row.puesto, row.entidad, row.ubicacion, row.convocatoria, 
-        row.remuneracion, row.fecha_inicio, row.fecha_fin, row.link, row.status
+    // Ordenamos por fecha de inicio descendente (lo más nuevo arriba)
+    const query = `
+      SELECT * FROM jobs 
+      WHERE status = 'ACTIVO' 
+      ORDER BY fecha_inicio DESC, created_at DESC
+    `;
+    
+    const res = await this.pool.query(query);
+    
+    return res.rows.map(row => new JobOffer(
+        row.id, 
+        row.puesto, 
+        row.entidad, 
+        row.ubicacion, 
+        row.convocatoria, 
+        row.remuneracion, 
+        row.fecha_inicio, 
+        row.fecha_fin, 
+        row.link, 
+        row.status
     ));
   }
 

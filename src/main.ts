@@ -3,7 +3,7 @@ import 'dotenv/config';
 
 import express from 'express';
 // import cron from 'node-cron';
-import { scrapeUseCase, expireUseCase } from './servir-jobs/container'; // Ajusta la ruta si 'container' está en otro lado
+import { scrapeUseCase, expireUseCase, getActiveJobsUseCase } from './servir-jobs/container'; // Ajusta la ruta si 'container' está en otro lado
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,6 +58,22 @@ else {
       res.status(500).json({ status: 'error', message: (error as Error).message });
     }
   });
+
+  app.get('/api/jobs', async (req, res) => {
+  try {
+    console.log('🌐 [API] Consultando ofertas activas...');
+    const jobs = await getActiveJobsUseCase.execute();
+    
+    res.status(200).json({
+      success: true,
+      count: jobs.length,
+      data: jobs
+    });
+  } catch (error) {
+    console.error('❌ Error obteniendo jobs:', error);
+    res.status(500).json({ success: false, message: 'Error interno del servidor' });
+  }
+});
 
   // Cron Job: Ejecutar todos los días a las 6:00 AM
   // Formato: Minuto Hora DíaMes Mes DíaSemana

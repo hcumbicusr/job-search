@@ -4,6 +4,7 @@ import { PuppeteerScraperAdapter } from "./infrastructure/scraping/PuppeteerScra
 import { NodeEventBus } from "./infrastructure/events/NodeEventBus";
 import { ScrapeAndSyncUseCase } from "./application/use-cases/ScrapeAndSyncUseCase";
 import { UpdateExpiredUseCase } from "./application/use-cases/UpdateExpiredUseCase";
+import { GetActiveJobsUseCase } from "./application/use-cases/GetActiveJobsUseCase";
 
 // const repository = new PrismaJobRepository(prisma);
 const repository = new PostgresJobRepository();
@@ -12,5 +13,6 @@ const eventBus = new NodeEventBus();
 
 const scrapeUseCase = new ScrapeAndSyncUseCase(repository, scraper, eventBus);
 const expireUseCase = new UpdateExpiredUseCase(repository);
+const getActiveJobsUseCase = new GetActiveJobsUseCase(repository);
 
-export { scrapeUseCase, expireUseCase };
+export { scrapeUseCase, expireUseCase, getActiveJobsUseCase };
