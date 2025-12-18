@@ -62,6 +62,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
             entidad: raw.entidad,
             ubicacion: raw.ubicacion,
             convocatoria: raw.convocatoria,
+            vacantes: raw.vacantes,
             remuneracion: raw.remuneracion,
             link: raw.link,
             fechaInicio: raw.fechaInicioStr ? new Date(raw.fechaInicioStr) : new Date(), 
