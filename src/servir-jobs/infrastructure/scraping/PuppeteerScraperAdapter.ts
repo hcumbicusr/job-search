@@ -1,5 +1,4 @@
-import chromium from 'chrome-aws-lambda';
-import { Page } from 'puppeteer-core';
+import puppeteer from 'puppeteer'; // Usamos el paquete estándar
 import { IScraperService } from "../../application/services/IScraperService";
 import { JobOffer } from "../../domain/entities/JobOffer";
 
@@ -9,11 +8,25 @@ export class PuppeteerScraperAdapter implements IScraperService {
   async scrapeJobs(locations: string[], searchProfile: string): Promise<Partial<JobOffer>[]> {
     console.log(">> [Scraper] Starting extraction process...");
     
-    const browser = await chromium.puppeteer.launch({
-      executablePath: await chromium.executablePath,
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      headless: true, //chromium.headless,
+    // CONFIGURACIÓN CRÍTICA PARA DOCKER + RASPBERRY PI
+    const browser = await puppeteer.launch({
+      // 1. Usar el Chromium del sistema instalado en el Dockerfile (/usr/bin/chromium)
+      // Si no encuentra la variable, intenta buscar uno local (útil para dev en PC)
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+
+      // 2. Modo Headless: En producción (Docker) debe ser true.
+      headless: process.env.NODE_ENV === 'production' ? true : false,
+
+      // 3. Argumentos OBLIGATORIOS para evitar crashes en Docker/ARM
+      args: [
+        "--no-sandbox",                // Necesario para correr como root en Docker
+        "--disable-setuid-sandbox",    // Seguridad
+        "--disable-dev-shm-usage",     // CRÍTICO en Raspberry Pi (evita error de memoria compartida)
+        "--disable-gpu",               // Ahorro de recursos
+        "--disable-extensions",
+        "--start-maximized"
+      ],
+      defaultViewport: null
     });
 
     const page = await browser.newPage();
@@ -22,13 +35,12 @@ export class PuppeteerScraperAdapter implements IScraperService {
     try {
       await page.goto(this.TARGET_URL, { waitUntil: "networkidle0" });
 
-      // ... (Lógica de llenado de Inputs y Selects igual que antes) ...
       const inputSelector = 'input[type="text"]';
       await page.waitForSelector(inputSelector);
       await page.type(inputSelector, searchProfile, { delay: 50 });
 
       for (const location of locations) {
-        // ... (Lógica de selección de ubicación y búsqueda igual) ...
+        // ... Lógica idéntica a tu código anterior ...
         const isLocationSelected = await this.selectLocationInDropdown(page, location);
         if (!isLocationSelected) continue;
 
@@ -37,17 +49,14 @@ export class PuppeteerScraperAdapter implements IScraperService {
         const hasResults = await this.waitForTableToUpdate(page, previousTitle);
         if (!hasResults) continue;
 
-        // --- BUCLE DE PAGINACIÓN ---
         let hasNextPage = true;
         let currentPage = 1;
 
         while (hasNextPage) {
           console.log(`   >> Scraping page ${currentPage} for ${location}...`);
           
-          // 1. Extraemos datos CRUDOS (Strings)
           const rawJobs = await this.extractRawDataFromPage(page, location);
           
-          // 2. Convertimos a Entidades de Dominio (Dates reales) en Node.js
           const cleanJobs: Partial<JobOffer>[] = rawJobs.map(raw => ({
             puesto: raw.puesto,
             entidad: raw.entidad,
@@ -55,7 +64,6 @@ export class PuppeteerScraperAdapter implements IScraperService {
             convocatoria: raw.convocatoria,
             remuneracion: raw.remuneracion,
             link: raw.link,
-            // AQUI OCURRE LA MAGIA: String -> Date Object
             fechaInicio: raw.fechaInicioStr ? new Date(raw.fechaInicioStr) : new Date(), 
             fechaFin: raw.fechaFinStr ? new Date(raw.fechaFinStr) : new Date(),
           }));
@@ -72,17 +80,17 @@ export class PuppeteerScraperAdapter implements IScraperService {
       console.error("[Scraper] Critical Error:", error);
       throw error;
     } finally {
-      await browser.close();
+      // Importante cerrar el browser para liberar RAM en la Pi
+      if (browser) await browser.close();
     }
 
     return allFoundJobs;
   }
 
-  // ... (Tus métodos privados selectLocationInDropdown, clickSearchButton, etc. se mantienen igual) ...
-  // Solo pegaré los métodos que cambian:
+  // --- MÉTODOS PRIVADOS (Se mantienen igual que tu versión) ---
 
-  private async selectLocationInDropdown(page: Page, locationName: string): Promise<boolean> {
-     return page.evaluate((loc) => {
+  private async selectLocationInDropdown(page: any, locationName: string): Promise<boolean> {
+     return page.evaluate((loc: string) => {
        const selects = Array.from(document.querySelectorAll("select"));
        const targetSelect = selects.find((s) => Array.from(s.options).some((o) => o.text.includes(loc)));
        if (targetSelect) {
@@ -97,24 +105,24 @@ export class PuppeteerScraperAdapter implements IScraperService {
      }, locationName);
    }
 
-   private async clickSearchButton(page: Page): Promise<void> {
+   private async clickSearchButton(page: any): Promise<void> {
      await page.evaluate(() => {
        const buttons = Array.from(document.querySelectorAll("button"));
-       const searchBtn = buttons.find((b) => b.innerText.toUpperCase().includes("BUSCAR"));
-       if (searchBtn) searchBtn.click();
+       const searchBtn = buttons.find((b) => (b as HTMLElement).innerText.toUpperCase().includes("BUSCAR"));
+       if (searchBtn) (searchBtn as HTMLElement).click();
      });
    }
  
-   private async getFirstJobTitle(page: Page): Promise<string> {
+   private async getFirstJobTitle(page: any): Promise<string> {
      try {
-       return await page.$eval(".cuadro-vacantes .titulo-vacante label", el => el.textContent?.trim() || "");
+       return await page.$eval(".cuadro-vacantes .titulo-vacante label", (el: any) => el.textContent?.trim() || "");
      } catch { return ""; }
    }
  
-   private async waitForTableToUpdate(page: Page, oldTitle: string): Promise<boolean> {
+   private async waitForTableToUpdate(page: any, oldTitle: string): Promise<boolean> {
      try {
        await page.waitForFunction(
-         (selector: any, previousTitle: any) => {
+         (selector: string, previousTitle: string) => {
            const newTitleEl = document.querySelector(`${selector} .titulo-vacante label`);
            const currentTitle = newTitleEl ? newTitleEl.textContent?.trim() : "";
            const noRecords = document.body.innerText.includes("No se encontraron registros");
@@ -127,10 +135,8 @@ export class PuppeteerScraperAdapter implements IScraperService {
      } catch { return false; }
    }
 
-  // --- CAMBIO PRINCIPAL AQUÍ ---
-  // Ahora devuelve 'any[]' con strings, no JobOffer directos
-  private async extractRawDataFromPage(page: Page, locationFilter: string): Promise<any[]> {
-    return page.evaluate((loc) => {
+  private async extractRawDataFromPage(page: any, locationFilter: string): Promise<any[]> {
+    return page.evaluate((loc: string) => {
       const jobCards = document.querySelectorAll(".cuadro-vacantes");
       const data: any[] = [];
 
@@ -147,13 +153,10 @@ export class PuppeteerScraperAdapter implements IScraperService {
         const title = card.querySelector(".titulo-vacante label")?.textContent?.trim();
         const entity = card.querySelector(".nombre-entidad")?.textContent?.trim();
 
-        // Helper para convertir "14/12/2025" a "2025-12-14" (ISO String Format YYYY-MM-DD)
-        // Devolvemos string, NO objeto Date, para evitar problemas de serialización
         const dateToIsoString = (dateStr: string): string | null => {
             if(!dateStr) return null;
-            const parts = dateStr.split('/'); // ["14", "12", "2025"]
+            const parts = dateStr.split('/');
             if(parts.length === 3) {
-                // Retornamos formato ISO simple: "2025-12-14"
                 return `${parts[2]}-${parts[1]}-${parts[0]}`;
             }
             return null;
@@ -166,7 +169,6 @@ export class PuppeteerScraperAdapter implements IScraperService {
             ubicacion: getValueByLabel("Ubicación:"),
             convocatoria: getValueByLabel("Número de Convocatoria:"),
             remuneracion: getValueByLabel("Remuneración:"),
-            // Devolvemos STRINGS
             fechaInicioStr: dateToIsoString(getValueByLabel("Fecha Inicio")),
             fechaFinStr: dateToIsoString(getValueByLabel("Fecha Fin")),
             link: "https://app.servir.gob.pe"
@@ -177,22 +179,21 @@ export class PuppeteerScraperAdapter implements IScraperService {
     }, locationFilter);
   }
 
-  // ... (goToNextPage se mantiene igual) ...
-  private async goToNextPage(page: Page): Promise<boolean> {
+  private async goToNextPage(page: any): Promise<boolean> {
       const nextButtonSelector = '[id="frmLstOfertsLabo:j_idt56"]';
       const paginatorTextSelector = ".btn-paginator-cnt";
       const nextBtn = await page.$(nextButtonSelector);
       if (!nextBtn) return false;
-      const isDisabled = await page.evaluate(el => el.classList.contains('ui-state-disabled'), nextBtn);
+      const isDisabled = await page.evaluate((el: any) => el.classList.contains('ui-state-disabled'), nextBtn);
       if (isDisabled) return false;
       
       let previousPaginatorText = "";
-      try { previousPaginatorText = await page.$eval(paginatorTextSelector, el => el.textContent || ""); } catch { return false; }
+      try { previousPaginatorText = await page.$eval(paginatorTextSelector, (el: any) => el.textContent || ""); } catch { return false; }
 
       await nextBtn.click();
 
       try {
-        await page.waitForFunction((selector, oldText) => {
+        await page.waitForFunction((selector: string, oldText: string) => {
             const el = document.querySelector(selector);
             return el && el.textContent !== oldText;
           }, { timeout: 10000 }, paginatorTextSelector, previousPaginatorText

@@ -17,12 +17,10 @@
   "type": "commonjs",
   "description": "",
   "dependencies": {
-    "chrome-aws-lambda": "^1.20.1",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "pg": "^8.16.3",
     "puppeteer": "^24.33.0",
-    "puppeteer-core": "^1.20.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
