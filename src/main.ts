@@ -4,7 +4,7 @@ import 'dotenv/config';
 import express from 'express';
 // import cron from 'node-cron';
 import { scrapeUseCase, expireUseCase, getActiveJobsUseCase } from './servir-jobs/container'; // Ajusta la ruta si 'container' está en otro lado
-
+import { JobMapper } from './servir-jobs/application/mappers/JobMapper';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -63,11 +63,13 @@ else {
   try {
     console.log('🌐 [API] Consultando ofertas activas...');
     const jobs = await getActiveJobsUseCase.execute();
+
+    const responseJobs = jobs.map(job => JobMapper.toDTO(job));
     
     res.status(200).json({
       success: true,
       count: jobs.length,
-      data: jobs
+      data: responseJobs
     });
   } catch (error) {
     console.error('❌ Error obteniendo jobs:', error);
