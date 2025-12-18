@@ -18,7 +18,8 @@
   "description": "",
   "dependencies": {
     "express": "^5.2.1",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "dotenv": "^17.2.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
@@ -26,7 +27,6 @@
     "@types/node": "^25.0.2",
     "@types/pg": "^8.16.0",
     "@types/uuid": "^9.0.8",
-    "dotenv": "^17.2.3",
     "jest": "^30.2.0",
     "puppeteer": "^24.33.0",
     "ts-jest": "^29.4.6",
