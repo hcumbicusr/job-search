@@ -1,23 +1,23 @@
 services:
   # --- Base de Datos PostgreSQL ---
-  db:
-    image: postgres:15
-    container_name: servir-postgres
-    restart: always
-    env_file:
-      - .env-docker
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+  # db:
+  #   image: postgres:15
+  #   container_name: servir-postgres
+  #   restart: always
+  #   env_file:
+  #     - .env-docker
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
 
   # --- Tu Aplicación Node.js ---
   app:
     container_name: servir-scraper
     build: .
     restart: always
-    depends_on:
-      - db
+    # depends_on:
+    #   - db
     env_file:
       - .env
     ports:
