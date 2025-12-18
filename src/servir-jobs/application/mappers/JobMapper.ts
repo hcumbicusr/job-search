@@ -1,8 +1,8 @@
 import { JobOffer } from "../../domain/entities/JobOffer";
-import { FindJobResponse } from "../dtos/FindJobResponse";
+import { FindJobResponseDTO } from "../dtos/FindJobResponseDTO";
 
 export class JobMapper {
-  static toDTO(job: JobOffer): FindJobResponse {
+  static toDTO(job: JobOffer): FindJobResponseDTO {
     return {
         id: job.id,
         puesto: job.puesto,

@@ -1,4 +1,4 @@
-export interface FindJobResponse {
+export interface FindJobResponseDTO {
     id: string,
     puesto: string,
     entidad: string,
