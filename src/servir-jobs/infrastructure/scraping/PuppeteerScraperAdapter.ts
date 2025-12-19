@@ -1,6 +1,7 @@
-import puppeteer from 'puppeteer'; // Usamos el paquete estándar
+import puppeteer, {Browser, Page} from 'puppeteer'; // Usamos el paquete estándar
 import { IScraperService } from "../../application/services/IScraperService";
 import { JobOffer } from "../../domain/entities/JobOffer";
+import { EnrichedJobDTO } from '../../application/dtos/EnrichedJobDTO';
 
 export class PuppeteerScraperAdapter implements IScraperService {
   private readonly TARGET_URL = "https://app.servir.gob.pe/DifusionOfertasExterno/faces/consultas/ofertas_laborales.xhtml";
@@ -8,27 +9,8 @@ export class PuppeteerScraperAdapter implements IScraperService {
   async scrapeJobs(locations: string[], searchProfile: string): Promise<Partial<JobOffer>[]> {
     console.log(">> [Scraper] Starting extraction process...");
     
-    // CONFIGURACIÓN CRÍTICA PARA DOCKER + RASPBERRY PI
-    const browser = await puppeteer.launch({
-      // 1. Usar el Chromium del sistema instalado en el Dockerfile (/usr/bin/chromium)
-      // Si no encuentra la variable, intenta buscar uno local (útil para dev en PC)
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-
-      // 2. Modo Headless: En producción (Docker) debe ser true.
-      headless: process.env.NODE_ENV === 'production' ? true : false,
-
-      // 3. Argumentos OBLIGATORIOS para evitar crashes en Docker/ARM
-      args: [
-        "--no-sandbox",                // Necesario para correr como root en Docker
-        "--disable-setuid-sandbox",    // Seguridad
-        "--disable-dev-shm-usage",     // CRÍTICO en Raspberry Pi (evita error de memoria compartida)
-        "--disable-gpu",               // Ahorro de recursos
-        "--disable-extensions",
-        "--start-maximized"
-      ],
-      defaultViewport: null
-    });
-
+    // 1. Iniciamos Browser (Reutilizamos configuración Docker/ARM)
+    const browser = await this.launchBrowser();
     const page = await browser.newPage();
     const allFoundJobs: Partial<JobOffer>[] = [];
 
@@ -62,6 +44,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
             entidad: raw.entidad,
             ubicacion: raw.ubicacion,
             convocatoria: raw.convocatoria,
+            vacantes: raw.vacantes,
             remuneracion: raw.remuneracion,
             link: raw.link,
             fechaInicio: raw.fechaInicioStr ? new Date(raw.fechaInicioStr) : new Date(), 
@@ -85,6 +68,219 @@ export class PuppeteerScraperAdapter implements IScraperService {
     }
 
     return allFoundJobs;
+  }
+
+  async scrapeEnrichedJobs(locations: string[], searchProfile: string): Promise<EnrichedJobDTO[]> {
+    console.log(">> [Scraper] Iniciando enriquecimiento masivo...");
+    
+    // 1. Lanzar Browser (Reutilizamos tu config de Docker)
+    const browser = await this.launchBrowser();
+    const page = await browser.newPage();
+    const enrichedResults: EnrichedJobDTO[] = [];
+
+    try {
+      await page.goto(this.TARGET_URL, { waitUntil: "networkidle0" });
+      
+      // Llenar buscador (reutilizamos lógica)
+      const inputSelector = 'input[type="text"]';
+      await page.waitForSelector(inputSelector);
+      await page.type(inputSelector, searchProfile, { delay: 50 });
+
+      for (const location of locations) {
+        console.log(`\n[Scraper] Procesando ubicación: ${location}`);
+        
+        // Seleccionar Ubicación y Buscar
+        const isSelected = await this.selectLocationInDropdown(page, location);
+        if (!isSelected) continue;
+
+        const prevTitle = await this.getFirstJobTitle(page);
+        await this.clickSearchButton(page);
+        const hasResults = await this.waitForTableToUpdate(page, prevTitle);
+        if (!hasResults) continue;
+
+        // --- BUCLE DE PAGINACIÓN ---
+        let hasNextPage = true;
+        let currentPage = 1;
+
+        while (hasNextPage) {
+          console.log(`   >> Procesando página ${currentPage}...`);
+          
+          // A. Contamos cuántas tarjetas hay en esta página
+          const cardsCount = await page.$$eval('.cuadro-vacantes', els => els.length);
+          console.log(`      Detectadas ${cardsCount} ofertas. Entrando una por una...`);
+
+          // B. Iteramos por ÍNDICE (Importante: porque el DOM cambia al volver atrás)
+          for (let i = 0; i < cardsCount; i++) {
+            
+            // 1. Recuperamos la tarjeta actual (Re-query obligatorio por "Stale Element")
+            // Evaluamos datos básicos ANTES de entrar (para el ID)
+            const basicInfo = await page.evaluate((index) => {
+                const cards = document.querySelectorAll('.cuadro-vacantes');
+                const card = cards[index];
+                if (!card) return null;
+
+                // Extraer datos básicos para el ID
+                const title = card.querySelector(".titulo-vacante label")?.textContent?.trim() || "";
+                const entity = card.querySelector(".nombre-entidad")?.textContent?.trim() || "";
+                
+                // Helper de fecha interno
+                const getLabel = (txt: string) => {
+                    const titles = Array.from(card.querySelectorAll(".sub-titulo"));
+                    const found = titles.find((el) => (el as HTMLElement).innerText.includes(txt));
+                    return found && found.nextElementSibling ? (found.nextElementSibling as HTMLElement).innerText.trim() : "";
+                };
+                
+                const fechaFinRaw = getLabel("Fecha Fin");
+                let fechaFinStr = "";
+                if (fechaFinRaw) {
+                    const parts = fechaFinRaw.split('/'); // 14/12/2025
+                    if(parts.length === 3) fechaFinStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+                }
+
+                return { title, entity, fechaFinStr };
+            }, i);
+
+            if (!basicInfo) continue;
+
+            // 2. Click en "Ver más" de la tarjeta i
+            // Buscamos el botón dentro de la tarjeta i y hacemos click
+            await page.evaluate((index) => {
+                const cards = document.querySelectorAll('.cuadro-vacantes');
+                const btn = cards[index].querySelector('button[title="¡Ver más!"]');
+                if (btn) (btn as HTMLElement).click();
+            }, i);
+
+            // 3. Esperar a que cargue el detalle
+            try {
+                await page.waitForSelector('#idDatosConvocatoria', { timeout: 10000 });
+            } catch (e) {
+                console.warn(`      [!] Error cargando detalle index ${i}. Saltando.`);
+                // Intentar volver si se quedó a medias o recargar
+                continue; 
+            }
+
+            // 4. Extraer Detalles (Requerimientos, N°, Url)
+            const detailInfo = await page.evaluate(() => {
+                // --- A. EXTRAER N° AVISO ---
+                const numEl = document.querySelector('.cuadro-seccion-lat .sub-titulo-2');
+                const rawNum = numEl ? numEl.textContent?.trim() : ''; 
+                const numeroAviso = rawNum ? rawNum.replace(/\D/g, '') : '';
+
+                // --- B. EXTRAER URL DETALLE (CORREGIDO) ---
+                let detalleUrl = "";
+                // 1. Buscamos todos los subtítulos
+                const labels = Array.from(document.querySelectorAll('.sub-titulo'));
+                // 2. Encontramos el que dice "DETALLE"
+                const labelDetalle = labels.find(el => el.textContent?.toUpperCase().includes("DETALLE"));
+                
+                if (labelDetalle) {
+                    // 3. Subimos al padre directo (div.col-sm-12)
+                    const parentContainer = labelDetalle.parentElement;
+                    if (parentContainer) {
+                        // 4. Buscamos cualquier <a> dentro de ese bloque. 
+                        // Esto es seguro porque el HTML agrupa label y link en el mismo div.
+                        const linkEl = parentContainer.querySelector('a');
+                        if (linkEl) detalleUrl = linkEl.href;
+                    }
+                }
+
+                // --- C. EXTRAER REQUERIMIENTOS (CORREGIDO PARA TU HTML) ---
+                let requerimientos = "";
+                // Buscamos el título "REQUERIMIENTO:"
+                const reqLabel = labels.find(el => el.textContent?.toUpperCase().includes("REQUERIMIENTO"));
+                
+                if (reqLabel) {
+                    // El HTML muestra que el UL está en un div hermano o contenedor superior.
+                    // Estrategia segura: Subir al contenedor principal de la sección (.cuadro-seccion)
+                    const mainContainer = reqLabel.closest('.cuadro-seccion');
+                    if (mainContainer) {
+                        const list = mainContainer.querySelector('ul');
+                        if (list) {
+                            // Usamos innerText para mantener los saltos de línea visuales
+                            requerimientos = (list as HTMLElement).innerText; 
+                        }
+                    }
+                }
+
+                return { numeroAviso, detalleUrl, requerimientos };
+            });
+
+            // 5. Agregamos a la lista de resultados
+            enrichedResults.push({
+                puesto: basicInfo.title,
+                entidad: basicInfo.entity,
+                fechaFinStr: basicInfo.fechaFinStr,
+                numeroAviso: detailInfo.numeroAviso,
+                requerimientos: detailInfo.requerimientos,
+                detalleUrl: detailInfo.detalleUrl
+            });
+
+            // 6. VOLVER A LA LISTA
+            // Buscamos el enlace "Volver a la lista" en la parte superior derecha
+            // O usamos history.back() si es AJAX (JSF suele usar AJAX, history back puede ser peligroso)
+            // Mejor buscamos el botón específico: <a ...>Volver a la lista</a>
+            const backSuccess = await page.evaluate(() => {
+                const links = Array.from(document.querySelectorAll('button, .btnlink'));
+                const backLink = links.find(l => l.textContent?.includes("Volver a la lista"));
+                if (backLink) {
+                    (backLink as HTMLElement).click();
+                    return true;
+                }
+                return false;
+            });
+
+            if (!backSuccess) {
+                console.error("      [!] No se encontró botón Volver. Intentando window.history.back()");
+                await page.goBack();
+            }
+
+            // 7. Esperar a que la tabla se restaure
+            await page.waitForSelector('.cuadro-vacantes', { timeout: 10000 });
+            // Pequeña pausa para asegurar estabilidad del DOM
+            await new Promise(r => setTimeout(r, 500)); 
+          }
+
+          // C. Siguiente Página (Fuera del bucle de items)
+          const paginationResult = await this.goToNextPage(page);
+          if (paginationResult) currentPage++;
+          else hasNextPage = false;
+        }
+      }
+
+    } catch (e) {
+        console.error("Error en scrapeEnrichedJobs", e);
+    } finally {
+        await browser.close();
+    }
+    
+    return enrichedResults;
+  }
+
+  private async launchBrowser(): Promise<Browser> {
+     return puppeteer.launch({
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      headless: process.env.NODE_ENV === 'production' ? true : false,
+      args: [
+        "--no-sandbox", 
+        "--disable-setuid-sandbox", 
+        "--disable-dev-shm-usage", 
+        "--disable-gpu", 
+        "--disable-extensions", 
+        "--start-maximized",
+      ],
+      defaultViewport: null
+    });
+  }
+
+  private async performSearch(page: Page, location: string, profile: string) {
+      const inputSelector = 'input[type="text"]';
+      await page.waitForSelector(inputSelector);
+      await page.type(inputSelector, profile, { delay: 50 });
+      
+      const isSelected = await this.selectLocationInDropdown(page, location);
+      if(isSelected) {
+          await this.clickSearchButton(page);
+      }
   }
 
   // --- MÉTODOS PRIVADOS (Se mantienen igual que tu versión) ---
@@ -168,6 +364,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
             entidad: entity,
             ubicacion: getValueByLabel("Ubicación:"),
             convocatoria: getValueByLabel("Número de Convocatoria:"),
+            vacantes: getValueByLabel("Cantidad de Vacantes:"),
             remuneracion: getValueByLabel("Remuneración:"),
             fechaInicioStr: dateToIsoString(getValueByLabel("Fecha Inicio")),
             fechaFinStr: dateToIsoString(getValueByLabel("Fecha Fin")),

@@ -8,12 +8,16 @@ export class JobOffer {
     public readonly entidad: string,
     public readonly ubicacion: string,
     public readonly convocatoria: string,
+    public readonly vacantes: number,
     public readonly remuneracion: string,
     public readonly fechaInicio: Date,
     public readonly fechaFin: Date,
     public readonly link: string,
     public status: JobStatus = 'ACTIVO',
-    public readonly createdAt: Date
+    public readonly fechaRegistro: Date = new Date(),
+    public numeroAviso?: string,
+    public requerimientos?: string,
+    public detalleUrl?: string
   ) {}
 
   public isExpired(): boolean {
@@ -25,5 +29,11 @@ export class JobOffer {
 
   public markAsFinished(): void {
     this.status = 'CONVOCATORIA FINALIZADA';
+  }
+
+  updateDetails(numeroAviso: string, requerimientos: string, detalleUrl: string) {
+    this.numeroAviso = numeroAviso;
+    this.requerimientos = requerimientos;
+    this.detalleUrl = detalleUrl;
   }
 }

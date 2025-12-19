@@ -48,6 +48,7 @@ export class ScrapeAndSyncUseCase {
           raw.entidad,
           raw.ubicacion || "NO ESPECIFICADO",
           raw.convocatoria || "S/N",
+          raw.vacantes || 1,
           raw.remuneracion || "A TRATAR",
           raw.fechaInicio || new Date(),
           raw.fechaFin,
