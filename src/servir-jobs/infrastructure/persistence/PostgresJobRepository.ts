@@ -55,4 +55,13 @@ export class PostgresJobRepository implements IJobRepository {
   async updateStatus(id: string, status: JobStatus): Promise<void> {
     await this.pool.query('UPDATE jobs SET status = $1 WHERE id = $2', [status, id]);
   }
+
+  async updateDetails(id: string, numeroAviso: string, requerimientos: string, detalleUrl: string): Promise<void> {
+    const query = `
+      UPDATE jobs 
+      SET numero_aviso = $2, requerimientos = $3, detalle_url = $4, updated_at = NOW() 
+      WHERE id = $1
+    `;
+    await this.pool.query(query, [id, numeroAviso, requerimientos, detalleUrl]);
+  }
 }

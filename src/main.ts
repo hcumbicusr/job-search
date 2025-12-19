@@ -3,7 +3,7 @@ import 'dotenv/config';
 
 import express from 'express';
 // import cron from 'node-cron';
-import { scrapeUseCase, expireUseCase, getActiveJobsUseCase } from './servir-jobs/container'; // Ajusta la ruta si 'container' está en otro lado
+import { scrapeUseCase, expireUseCase, getActiveJobsUseCase, enrichJobsUseCase } from './servir-jobs/container'; // Ajusta la ruta si 'container' está en otro lado
 import { JobMapper } from './servir-jobs/application/mappers/JobMapper';
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -60,22 +60,44 @@ else {
   });
 
   app.get('/api/jobs', async (req, res) => {
-  try {
-    console.log('🌐 [API] Consultando ofertas activas...');
-    const jobs = await getActiveJobsUseCase.execute();
+    try {
+      console.log('🌐 [API] Consultando ofertas activas...');
+      const jobs = await getActiveJobsUseCase.execute();
 
-    const responseJobs = jobs.map(job => JobMapper.toDTO(job));
-    
-    res.status(200).json({
-      success: true,
-      count: jobs.length,
-      data: responseJobs
-    });
-  } catch (error) {
-    console.error('❌ Error obteniendo jobs:', error);
-    res.status(500).json({ success: false, message: 'Error interno del servidor' });
-  }
-});
+      const responseJobs = jobs.map(job => JobMapper.toDTO(job));
+      
+      res.status(200).json({
+        success: true,
+        count: jobs.length,
+        data: responseJobs
+      });
+    } catch (error) {
+      console.error('❌ Error obteniendo jobs:', error);
+      res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+  });
+
+  app.post('/api/jobs/enrich-all', async (req, res) => {
+    try {
+      const { locations, profile } = req.body;
+      const locs = locations || ['LIMA'];
+      const prof = profile || 'INGENIERIA DE SISTEMAS';
+
+      console.log("🌐 [API] Solicitud de Enriquecimiento Masivo recibida.");
+      
+      const result = await enrichJobsUseCase.execute(locs, prof);
+
+      res.status(200).json({
+        success: true,
+        message: 'Proceso de enriquecimiento finalizado.',
+        stats: result
+      });
+
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ success: false, message: (error as Error).message });
+    }
+  });
 
   // Cron Job: Ejecutar todos los días a las 6:00 AM
   // Formato: Minuto Hora DíaMes Mes DíaSemana

@@ -6,4 +6,5 @@ export interface IJobRepository {
   exists(id: string): Promise<boolean>;
   findActive(): Promise<JobOffer[]>;
   updateStatus(id: string, status: JobStatus): Promise<void>;
+  updateDetails(id: string, numeroAviso: string, requerimientos: string, detalleUrl: string): Promise<void>;
 }
