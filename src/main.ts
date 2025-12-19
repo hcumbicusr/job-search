@@ -123,6 +123,7 @@ else {
     └──────────────────────────────────────────────────┘
     `);
   });
+  server.setTimeout(300000);
 
   // Graceful Shutdown (Cierre limpio)
   const shutdown = async () => {

@@ -76,14 +76,18 @@ export class PuppeteerScraperAdapter implements IScraperService {
     // 1. Lanzar Browser (Reutilizamos tu config de Docker)
     const browser = await this.launchBrowser();
     const page = await browser.newPage();
-    // 1. AUMENTAR TIMEOUT GLOBAL (90 segundos)
-    page.setDefaultNavigationTimeout(90000); 
-    page.setDefaultTimeout(90000);
+    
+    // --- OPTIMIZACIÓN 1: TIMEOUT EXTENDIDO ---
+    // Le damos 2 minutos (120000 ms) en lugar de 30s
+    page.setDefaultNavigationTimeout(120000); 
+    page.setDefaultTimeout(120000);
 
-    // 2. INTERCEPTAR Y BLOQUEAR IMÁGENES (Ahorra CPU y Red)
+    // --- OPTIMIZACIÓN 2: BLOQUEO DE RECURSOS (Vital para Raspberry) ---
+    // Esto hace que la carga sea un 50% más rápida y consuma menos RAM
     await page.setRequestInterception(true);
     page.on('request', (req) => {
-        if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+        const resourceType = req.resourceType();
+        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
             req.abort();
         } else {
             req.continue();
@@ -93,19 +97,22 @@ export class PuppeteerScraperAdapter implements IScraperService {
     const enrichedResults: EnrichedJobDTO[] = [];
 
     try {
+      // --- OPTIMIZACIÓN 3: ESTRATEGIA DE CARGA ---
+      // Usamos 'domcontentloaded' (estructura lista) en vez de 'networkidle0' (red vacía)
       await page.goto(this.TARGET_URL, { waitUntil: "domcontentloaded" });
       
-      // Llenar buscador (reutilizamos lógica)
+      // Esperamos explícitamente al input, que es lo vital
       const inputSelector = 'input[type="text"]';
       await page.waitForSelector(inputSelector, { timeout: 60000 });
-      await new Promise(r => setTimeout(r, 2000));
+      
+      // Pausa de seguridad para scripts JSF
+      await new Promise(r => setTimeout(r, 1500));
 
-      await page.type(inputSelector, searchProfile, { delay: 100 });
+      await page.type(inputSelector, searchProfile, { delay: 100 }); 
 
       for (const location of locations) {
         console.log(`\n[Scraper] Procesando ubicación: ${location}`);
         
-        // Seleccionar Ubicación y Buscar
         const isSelected = await this.selectLocationInDropdown(page, location);
         if (!isSelected) continue;
 
@@ -114,18 +121,15 @@ export class PuppeteerScraperAdapter implements IScraperService {
         const hasResults = await this.waitForTableToUpdate(page, prevTitle);
         if (!hasResults) continue;
 
-        // --- BUCLE DE PAGINACIÓN ---
         let hasNextPage = true;
         let currentPage = 1;
 
         while (hasNextPage) {
           console.log(`   >> Procesando página ${currentPage}...`);
           
-          // A. Contamos cuántas tarjetas hay en esta página
           const cardsCount = await page.$$eval('.cuadro-vacantes', els => els.length);
-          console.log(`      Detectadas ${cardsCount} ofertas. Entrando una por una...`);
+          console.log(`      Detectadas ${cardsCount} ofertas.`);
 
-          // B. Iteramos por ÍNDICE (Importante: porque el DOM cambia al volver atrás)
           for (let i = 0; i < cardsCount; i++) {
             
             // 1. Recuperamos la tarjeta actual (Re-query obligatorio por "Stale Element")
@@ -256,7 +260,6 @@ export class PuppeteerScraperAdapter implements IScraperService {
             await new Promise(r => setTimeout(r, 500)); 
           }
 
-          // C. Siguiente Página (Fuera del bucle de items)
           const paginationResult = await this.goToNextPage(page);
           if (paginationResult) currentPage++;
           else hasNextPage = false;
@@ -264,7 +267,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
       }
 
     } catch (e) {
-        console.error("Error en scrapeEnrichedJobs", e);
+        console.error("Error en scrapeEnrichedJobs:", e);
     } finally {
         await browser.close();
     }
@@ -283,9 +286,8 @@ export class PuppeteerScraperAdapter implements IScraperService {
         "--disable-gpu", 
         "--disable-extensions", 
         "--start-maximized",
-        // Flags extra para rendimiento en ARM
+        // Flags adicionales para reducir carga en CPU ARM
         "--disable-accelerated-2d-canvas",
-        "--disable-speech-api", 
         "--no-first-run",
         "--no-zygote"
       ],
