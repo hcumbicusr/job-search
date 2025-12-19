@@ -76,15 +76,31 @@ export class PuppeteerScraperAdapter implements IScraperService {
     // 1. Lanzar Browser (Reutilizamos tu config de Docker)
     const browser = await this.launchBrowser();
     const page = await browser.newPage();
+    // 1. AUMENTAR TIMEOUT GLOBAL (90 segundos)
+    page.setDefaultNavigationTimeout(90000); 
+    page.setDefaultTimeout(90000);
+
+    // 2. INTERCEPTAR Y BLOQUEAR IMÁGENES (Ahorra CPU y Red)
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+        if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+            req.abort();
+        } else {
+            req.continue();
+        }
+    });
+
     const enrichedResults: EnrichedJobDTO[] = [];
 
     try {
-      await page.goto(this.TARGET_URL, { waitUntil: "networkidle0" });
+      await page.goto(this.TARGET_URL, { waitUntil: "domcontentloaded" });
       
       // Llenar buscador (reutilizamos lógica)
       const inputSelector = 'input[type="text"]';
-      await page.waitForSelector(inputSelector);
-      await page.type(inputSelector, searchProfile, { delay: 50 });
+      await page.waitForSelector(inputSelector, { timeout: 60000 });
+      await new Promise(r => setTimeout(r, 2000));
+
+      await page.type(inputSelector, searchProfile, { delay: 100 });
 
       for (const location of locations) {
         console.log(`\n[Scraper] Procesando ubicación: ${location}`);
@@ -267,6 +283,11 @@ export class PuppeteerScraperAdapter implements IScraperService {
         "--disable-gpu", 
         "--disable-extensions", 
         "--start-maximized",
+        // Flags extra para rendimiento en ARM
+        "--disable-accelerated-2d-canvas",
+        "--disable-speech-api", 
+        "--no-first-run",
+        "--no-zygote"
       ],
       defaultViewport: null
     });
