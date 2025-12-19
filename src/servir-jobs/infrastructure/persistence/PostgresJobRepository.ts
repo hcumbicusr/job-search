@@ -48,7 +48,10 @@ export class PostgresJobRepository implements IJobRepository {
         row.fecha_fin, 
         row.link, 
         row.status,
-        row.created_at
+        row.created_at,
+        row.numero_aviso,
+        row.requerimientos,
+        row.detalle_url
     ));
   }
 
