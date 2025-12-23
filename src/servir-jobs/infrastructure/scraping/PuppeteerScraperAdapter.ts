@@ -1,4 +1,4 @@
-import puppeteer, {Browser, Page} from 'puppeteer'; // Usamos el paquete estándar
+import puppeteer, { Browser, Page } from 'puppeteer';
 import { IScraperService } from "../../application/services/IScraperService";
 import { JobOffer } from "../../domain/entities/JobOffer";
 import { EnrichedJobDTO } from '../../application/dtos/EnrichedJobDTO';
@@ -6,23 +6,33 @@ import { EnrichedJobDTO } from '../../application/dtos/EnrichedJobDTO';
 export class PuppeteerScraperAdapter implements IScraperService {
   private readonly TARGET_URL = "https://app.servir.gob.pe/DifusionOfertasExterno/faces/consultas/ofertas_laborales.xhtml";
 
+  // ===========================================================================
+  // 1. SCRAPE JOBS (Listado Simple) - REPARADO
+  // ===========================================================================
   async scrapeJobs(locations: string[], searchProfile: string): Promise<Partial<JobOffer>[]> {
-    console.log(">> [Scraper] Starting extraction process...");
+    console.log(">> [Scraper] Starting simple extraction process (Optimized)...");
     
-    // 1. Iniciamos Browser (Reutilizamos configuración Docker/ARM)
     const browser = await this.launchBrowser();
     const page = await browser.newPage();
+    
+    // APLICAR OPTIMIZACIONES DE RASPBERRY PI
+    await this.configurePageForPerformance(page);
+
     const allFoundJobs: Partial<JobOffer>[] = [];
 
     try {
-      await page.goto(this.TARGET_URL, { waitUntil: "networkidle0" });
+      // Usamos carga ligera (domcontentloaded) en lugar de networkidle0
+      await page.goto(this.TARGET_URL, { waitUntil: "domcontentloaded" });
 
       const inputSelector = 'input[type="text"]';
-      await page.waitForSelector(inputSelector);
+      await page.waitForSelector(inputSelector, { timeout: 60000 });
+      await new Promise(r => setTimeout(r, 1000)); // Pequeña pausa
+      
       await page.type(inputSelector, searchProfile, { delay: 50 });
 
       for (const location of locations) {
-        // ... Lógica idéntica a tu código anterior ...
+        console.log(`   >> Processing location: ${location}`);
+        
         const isLocationSelected = await this.selectLocationInDropdown(page, location);
         if (!isLocationSelected) continue;
 
@@ -35,7 +45,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
         let currentPage = 1;
 
         while (hasNextPage) {
-          console.log(`   >> Scraping page ${currentPage} for ${location}...`);
+          console.log(`      >> Scraping page ${currentPage} for ${location}...`);
           
           const rawJobs = await this.extractRawDataFromPage(page, location);
           
@@ -52,7 +62,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
           }));
 
           allFoundJobs.push(...cleanJobs);
-          console.log(`      + Extracted ${cleanJobs.length} jobs.`);
+          console.log(`         + Extracted ${cleanJobs.length} jobs.`);
 
           const paginationResult = await this.goToNextPage(page);
           if (paginationResult) currentPage++;
@@ -60,52 +70,34 @@ export class PuppeteerScraperAdapter implements IScraperService {
         }
       }
     } catch (error) {
-      console.error("[Scraper] Critical Error:", error);
+      console.error("[Scraper] Critical Error in scrapeJobs:", error);
       throw error;
     } finally {
-      // Importante cerrar el browser para liberar RAM en la Pi
       if (browser) await browser.close();
     }
 
     return allFoundJobs;
   }
 
+  // ===========================================================================
+  // 2. SCRAPE ENRICHED JOBS (Detallado) - OPTIMIZADO
+  // ===========================================================================
   async scrapeEnrichedJobs(locations: string[], searchProfile: string): Promise<EnrichedJobDTO[]> {
     console.log(">> [Scraper] Iniciando enriquecimiento masivo...");
     
-    // 1. Lanzar Browser (Reutilizamos tu config de Docker)
     const browser = await this.launchBrowser();
     const page = await browser.newPage();
     
-    // --- OPTIMIZACIÓN 1: TIMEOUT EXTENDIDO ---
-    // Le damos 2 minutos (120000 ms) en lugar de 30s
-    page.setDefaultNavigationTimeout(120000); 
-    page.setDefaultTimeout(120000);
-
-    // --- OPTIMIZACIÓN 2: BLOQUEO DE RECURSOS (Vital para Raspberry) ---
-    // Esto hace que la carga sea un 50% más rápida y consuma menos RAM
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-        const resourceType = req.resourceType();
-        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-            req.abort();
-        } else {
-            req.continue();
-        }
-    });
+    // APLICAR OPTIMIZACIONES DE RASPBERRY PI
+    await this.configurePageForPerformance(page);
 
     const enrichedResults: EnrichedJobDTO[] = [];
 
     try {
-      // --- OPTIMIZACIÓN 3: ESTRATEGIA DE CARGA ---
-      // Usamos 'domcontentloaded' (estructura lista) en vez de 'networkidle0' (red vacía)
       await page.goto(this.TARGET_URL, { waitUntil: "domcontentloaded" });
       
-      // Esperamos explícitamente al input, que es lo vital
       const inputSelector = 'input[type="text"]';
       await page.waitForSelector(inputSelector, { timeout: 60000 });
-      
-      // Pausa de seguridad para scripts JSF
       await new Promise(r => setTimeout(r, 1500));
 
       await page.type(inputSelector, searchProfile, { delay: 100 }); 
@@ -132,18 +124,15 @@ export class PuppeteerScraperAdapter implements IScraperService {
 
           for (let i = 0; i < cardsCount; i++) {
             
-            // 1. Recuperamos la tarjeta actual (Re-query obligatorio por "Stale Element")
-            // Evaluamos datos básicos ANTES de entrar (para el ID)
+            // 1. Datos básicos
             const basicInfo = await page.evaluate((index) => {
                 const cards = document.querySelectorAll('.cuadro-vacantes');
                 const card = cards[index];
                 if (!card) return null;
 
-                // Extraer datos básicos para el ID
                 const title = card.querySelector(".titulo-vacante label")?.textContent?.trim() || "";
                 const entity = card.querySelector(".nombre-entidad")?.textContent?.trim() || "";
                 
-                // Helper de fecha interno
                 const getLabel = (txt: string) => {
                     const titles = Array.from(card.querySelectorAll(".sub-titulo"));
                     const found = titles.find((el) => (el as HTMLElement).innerText.includes(txt));
@@ -153,7 +142,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
                 const fechaFinRaw = getLabel("Fecha Fin");
                 let fechaFinStr = "";
                 if (fechaFinRaw) {
-                    const parts = fechaFinRaw.split('/'); // 14/12/2025
+                    const parts = fechaFinRaw.split('/');
                     if(parts.length === 3) fechaFinStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
                 }
 
@@ -162,83 +151,60 @@ export class PuppeteerScraperAdapter implements IScraperService {
 
             if (!basicInfo) continue;
 
-            // 2. Click en "Ver más" de la tarjeta i
-            // Buscamos el botón dentro de la tarjeta i y hacemos click
+            // 2. Click Ver Más
             await page.evaluate((index) => {
                 const cards = document.querySelectorAll('.cuadro-vacantes');
                 const btn = cards[index].querySelector('button[title="¡Ver más!"]');
                 if (btn) (btn as HTMLElement).click();
             }, i);
 
-            // 3. Esperar a que cargue el detalle
+            // 3. Esperar Detalle
             try {
-                await page.waitForSelector('#idDatosConvocatoria', { timeout: 10000 });
+                await page.waitForSelector('#idDatosConvocatoria', { timeout: 15000 });
             } catch (e) {
                 console.warn(`      [!] Error cargando detalle index ${i}. Saltando.`);
-                // Intentar volver si se quedó a medias o recargar
                 continue; 
             }
 
-            // 4. Extraer Detalles (Requerimientos, N°, Url)
+            // 4. Extraer Detalle
             const detailInfo = await page.evaluate(() => {
-                // --- A. EXTRAER N° AVISO ---
+                // N° Aviso
                 const numEl = document.querySelector('.cuadro-seccion-lat .sub-titulo-2');
-                const rawNum = numEl ? numEl.textContent?.trim() : ''; 
-                const numeroAviso = rawNum ? rawNum.replace(/\D/g, '') : '';
+                const numeroAviso = numEl ? numEl.textContent?.trim().replace(/\D/g, '') : '';
 
-                // --- B. EXTRAER URL DETALLE (CORREGIDO) ---
+                // URL Detalle
                 let detalleUrl = "";
-                // 1. Buscamos todos los subtítulos
                 const labels = Array.from(document.querySelectorAll('.sub-titulo'));
-                // 2. Encontramos el que dice "DETALLE"
                 const labelDetalle = labels.find(el => el.textContent?.toUpperCase().includes("DETALLE"));
-                
-                if (labelDetalle) {
-                    // 3. Subimos al padre directo (div.col-sm-12)
-                    const parentContainer = labelDetalle.parentElement;
-                    if (parentContainer) {
-                        // 4. Buscamos cualquier <a> dentro de ese bloque. 
-                        // Esto es seguro porque el HTML agrupa label y link en el mismo div.
-                        const linkEl = parentContainer.querySelector('a');
-                        if (linkEl) detalleUrl = linkEl.href;
-                    }
+                if (labelDetalle && labelDetalle.parentElement) {
+                    const linkEl = labelDetalle.parentElement.querySelector('a');
+                    if (linkEl) detalleUrl = linkEl.href;
                 }
 
-                // --- C. EXTRAER REQUERIMIENTOS (CORREGIDO PARA TU HTML) ---
+                // Requerimientos
                 let requerimientos = "";
-                // Buscamos el título "REQUERIMIENTO:"
                 const reqLabel = labels.find(el => el.textContent?.toUpperCase().includes("REQUERIMIENTO"));
-                
                 if (reqLabel) {
-                    // El HTML muestra que el UL está en un div hermano o contenedor superior.
-                    // Estrategia segura: Subir al contenedor principal de la sección (.cuadro-seccion)
                     const mainContainer = reqLabel.closest('.cuadro-seccion');
                     if (mainContainer) {
                         const list = mainContainer.querySelector('ul');
-                        if (list) {
-                            // Usamos innerText para mantener los saltos de línea visuales
-                            requerimientos = (list as HTMLElement).innerText; 
-                        }
+                        if (list) requerimientos = (list as HTMLElement).innerText; 
                     }
                 }
 
                 return { numeroAviso, detalleUrl, requerimientos };
             });
 
-            // 5. Agregamos a la lista de resultados
             enrichedResults.push({
                 puesto: basicInfo.title,
                 entidad: basicInfo.entity,
                 fechaFinStr: basicInfo.fechaFinStr,
-                numeroAviso: detailInfo.numeroAviso,
-                requerimientos: detailInfo.requerimientos,
-                detalleUrl: detailInfo.detalleUrl
+                numeroAviso: detailInfo.numeroAviso || "",
+                requerimientos: detailInfo.requerimientos || "",
+                detalleUrl: detailInfo.detalleUrl || ""
             });
 
-            // 6. VOLVER A LA LISTA
-            // Buscamos el enlace "Volver a la lista" en la parte superior derecha
-            // O usamos history.back() si es AJAX (JSF suele usar AJAX, history back puede ser peligroso)
-            // Mejor buscamos el botón específico: <a ...>Volver a la lista</a>
+            // 5. Volver
             const backSuccess = await page.evaluate(() => {
                 const links = Array.from(document.querySelectorAll('button, .btnlink'));
                 const backLink = links.find(l => l.textContent?.includes("Volver a la lista"));
@@ -249,14 +215,9 @@ export class PuppeteerScraperAdapter implements IScraperService {
                 return false;
             });
 
-            if (!backSuccess) {
-                console.error("      [!] No se encontró botón Volver. Intentando window.history.back()");
-                await page.goBack();
-            }
+            if (!backSuccess) await page.goBack();
 
-            // 7. Esperar a que la tabla se restaure
-            await page.waitForSelector('.cuadro-vacantes', { timeout: 10000 });
-            // Pequeña pausa para asegurar estabilidad del DOM
+            await page.waitForSelector('.cuadro-vacantes', { timeout: 15000 });
             await new Promise(r => setTimeout(r, 500)); 
           }
 
@@ -275,6 +236,11 @@ export class PuppeteerScraperAdapter implements IScraperService {
     return enrichedResults;
   }
 
+  // ===========================================================================
+  // HELPERS (Configuración y Navegación)
+  // ===========================================================================
+
+  // 1. Configuración centralizada del Browser
   private async launchBrowser(): Promise<Browser> {
      return puppeteer.launch({
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -286,7 +252,6 @@ export class PuppeteerScraperAdapter implements IScraperService {
         "--disable-gpu", 
         "--disable-extensions", 
         "--start-maximized",
-        // Flags adicionales para reducir carga en CPU ARM
         "--disable-accelerated-2d-canvas",
         "--no-first-run",
         "--no-zygote"
@@ -295,18 +260,22 @@ export class PuppeteerScraperAdapter implements IScraperService {
     });
   }
 
-  private async performSearch(page: Page, location: string, profile: string) {
-      const inputSelector = 'input[type="text"]';
-      await page.waitForSelector(inputSelector);
-      await page.type(inputSelector, profile, { delay: 50 });
-      
-      const isSelected = await this.selectLocationInDropdown(page, location);
-      if(isSelected) {
-          await this.clickSearchButton(page);
-      }
-  }
+  // 2. Configuración centralizada de la Página (Timeouts y Bloqueo de recursos)
+  private async configurePageForPerformance(page: Page): Promise<void> {
+    // Timeout alto para Raspberry Pi
+    page.setDefaultNavigationTimeout(120000); 
+    page.setDefaultTimeout(120000);
 
-  // --- MÉTODOS PRIVADOS (Se mantienen igual que tu versión) ---
+    // Bloqueo de Imágenes y Fuentes para velocidad
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+        if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+            req.abort();
+        } else {
+            req.continue();
+        }
+    });
+  }
 
   private async selectLocationInDropdown(page: any, locationName: string): Promise<boolean> {
      return page.evaluate((loc: string) => {
@@ -347,7 +316,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
            const noRecords = document.body.innerText.includes("No se encontraron registros");
            return (currentTitle !== "" && currentTitle !== previousTitle) || noRecords;
          },
-         { timeout: 15000 }, ".cuadro-vacantes", oldTitle
+         { timeout: 30000 }, ".cuadro-vacantes", oldTitle
        );
        await new Promise(r => setTimeout(r, 1000));
        return (await page.$(".cuadro-vacantes")) !== null;
@@ -416,7 +385,7 @@ export class PuppeteerScraperAdapter implements IScraperService {
         await page.waitForFunction((selector: string, oldText: string) => {
             const el = document.querySelector(selector);
             return el && el.textContent !== oldText;
-          }, { timeout: 10000 }, paginatorTextSelector, previousPaginatorText
+          }, { timeout: 30000 }, paginatorTextSelector, previousPaginatorText
         );
         await new Promise(r => setTimeout(r, 1500));
         return true;
